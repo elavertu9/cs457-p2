@@ -1,16 +1,63 @@
-import sys, socket
-# acts as both the client and server
-# there is 1 ss running on each machine.
-# When the ss starts it prints the hostname and port it is listening to,
-# and then waits for connections
-# Once, connection arrives, the ss reads the list of remaining ss's in the request
-# and if the list is not empty, strips itself from the list and forwards the request to a randomly
-# chosen ss in the list. If the ss is the last entry on the list, it extracts the URL of the desired
-# document and executes the system() command to issue a wget to retrieve the document,
-# and then forwards the document back to the previous ss.
-# once the document is forwarded, the ss erases the local copy of the file and tears down the connection
+import sys, socket, random
+
 def printUsage():
     print('Usage: ss.py <PORT>')
+
+
+def goToNextHop(address, port, hopList):
+    byteString = ""
+    numHops = len(hopList)
+
+    if numHops > 1:
+        for hop in hopList:
+            if hop == hopList[len(hopList) - 1]:
+                byteString += hop
+            else:
+                byteString += hop + ","
+    else:
+        byteString = hopList[0]
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.connect((address, port))
+        sock.sendall(byteString.encode())
+
+
+def handleClient(hopList, hostname, port):
+    # Remove self from hopList
+    ip = socket.gethostbyname(hostname)
+    removeStr = ip + " " + str(port)
+    numHops = len(hopList)
+
+    if numHops == 1:
+        hopList.pop(0)
+    else:
+        for i in range(numHops - 1):
+            if hopList[i] == removeStr:
+                hopList.pop(i)
+
+    # Reassign numHops post removal
+    numHops = len(hopList)
+
+    # Check if last hop
+    if numHops == 0:
+        # call wget
+        print("Getting file")
+    elif numHops == 1:
+        # Go to Last Hop
+        print("Going to last hop")
+        nextHop = hopList[0]
+        ssInfo = nextHop.split(" ")
+        ssAddress = ssInfo[0]
+        ssPort = int(ssInfo[1])
+        goToNextHop(ssAddress, ssPort, hopList)
+    else:
+        # not done yet go to next hop
+        randomSS = random.randint(0, numHops - 1)
+        nextHop = hopList[randomSS]
+        ssInfo = nextHop.split(" ")
+        ssAddress = ssInfo[0]
+        ssPort = int(ssInfo[1])
+        goToNextHop(ssAddress, ssPort, hopList)
 
 
 def createConnection(hostname, port = 8099):
@@ -26,7 +73,7 @@ def createConnection(hostname, port = 8099):
                 if not data:
                     break
                 hopList = data.decode().split(",")
-                print(hopList)
+                handleClient(hopList, hostname, port)
 
 
 def main():

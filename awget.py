@@ -1,18 +1,10 @@
 import sys, random, socket
 
-# Takes up to 2 command line args
-    # awget <URL> [-c chainfile]
-    # if no chainfile supplied, read the local file called chaingang.txt
-    # else if problems with file, print error and exit
-
 def printUsage():
     print('Usage: awget.py <URL> -c <chainfile>')
 
 
 def createConnection(address, port, hopList):
-    print(address)
-    print(port)
-    print(hopList)
     byteString = ""
     for hop in hopList:
         if hop == hopList[len(hopList) - 1]:
