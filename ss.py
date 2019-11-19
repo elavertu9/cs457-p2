@@ -4,25 +4,25 @@ def printUsage():
     print('Usage: ss.py <PORT>')
 
 
-def goToNextHop(address, port, hopList):
+def goToNextHop(address, port, hopList, URL):
+    # Convert hopList to bytestring
     byteString = ""
     numHops = len(hopList)
 
     if numHops > 1:
         for hop in hopList:
-            if hop == hopList[len(hopList) - 1]:
-                byteString += hop
-            else:
-                byteString += hop + ","
+            byteString += hop + ","
+        byteString += URL
     else:
-        byteString = hopList[0]
+        byteString = hopList[0] + "," + URL
 
+    # Send bytestring over socket connection to next SS
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.connect((address, port))
         sock.sendall(byteString.encode())
 
 
-def handleClient(hopList, hostname, port):
+def handleClient(hopList, hostname, port, URL):
     # Remove self from hopList
     ip = socket.gethostbyname(hostname)
     removeStr = ip + " " + str(port)
@@ -41,7 +41,7 @@ def handleClient(hopList, hostname, port):
     # Check if last hop
     if numHops == 0:
         # call wget
-        print("Getting file")
+        print("I am the last hop, getting file: " + URL)
     elif numHops == 1:
         # Go to Last Hop
         print("Going to last hop")
@@ -49,7 +49,7 @@ def handleClient(hopList, hostname, port):
         ssInfo = nextHop.split(" ")
         ssAddress = ssInfo[0]
         ssPort = int(ssInfo[1])
-        goToNextHop(ssAddress, ssPort, hopList)
+        goToNextHop(ssAddress, ssPort, hopList, URL)
     else:
         # not done yet go to next hop
         randomSS = random.randint(0, numHops - 1)
@@ -57,11 +57,13 @@ def handleClient(hopList, hostname, port):
         ssInfo = nextHop.split(" ")
         ssAddress = ssInfo[0]
         ssPort = int(ssInfo[1])
-        goToNextHop(ssAddress, ssPort, hopList)
+        goToNextHop(ssAddress, ssPort, hopList, URL)
 
 
 def createConnection(hostname, port = 8099):
     print("Running on " + hostname + ":" + str(port))
+
+    # Create listening socket for connection requests from awget.py
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind((hostname, port))
         sock.listen()
@@ -73,7 +75,8 @@ def createConnection(hostname, port = 8099):
                 if not data:
                     break
                 hopList = data.decode().split(",")
-                handleClient(hopList, hostname, port)
+                URL = hopList.pop(len(hopList) - 1)
+                handleClient(hopList, hostname, port, URL)
 
 
 def main():

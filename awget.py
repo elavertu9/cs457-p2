@@ -4,15 +4,14 @@ def printUsage():
     print('Usage: awget.py <URL> -c <chainfile>')
 
 
-def createConnection(address, port, hopList):
+def createConnection(address, port, hopList, URL):
+    # Convert hopList to bytestring
     byteString = ""
     for hop in hopList:
-        if hop == hopList[len(hopList) - 1]:
-            byteString += hop
-        else:
-            byteString += hop + ","
+        byteString += hop + ","
+    byteString += URL
 
-    print(byteString)
+    # Send bytestring over socket connection to next SS
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.connect((address, port))
         sock.sendall(byteString.encode())
@@ -31,7 +30,7 @@ def readFile(URL, fileName = "chaingang.txt"):
         ssInfo = nextHop.split(" ")
         ssAddress = ssInfo[0]
         ssPort = int(ssInfo[1])
-        createConnection(ssAddress, ssPort, hopList)
+        createConnection(ssAddress, ssPort, hopList, URL)
     except IOError:
         print("Could not open/read file " + fileName + "\nExiting...")
         exit(1)
