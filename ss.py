@@ -18,14 +18,15 @@ def createConnection(hostname, port = 8099):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind((hostname, port))
         sock.listen()
-        connection, address = s.accept()
+        connection, address = sock.accept()
         with connection:
             print("Connected by", address)
             while True:
                 data = connection.recv(1024)
                 if not data:
                     break
-                print(data)
+                hopList = data.decode().split(",")
+                print(hopList)
 
 
 def main():
