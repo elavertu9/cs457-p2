@@ -16,6 +16,12 @@ def createConnection(address, port):
     #     sock.bind((address, port))
 
 
+def createChain(hopList):
+    print("Creating Chain")
+    print(hopList)
+    for ss in hopList:
+        print(ss)
+
 
 def readFile(URL, fileName = "chaingang.txt"):
     hopList = []
@@ -30,6 +36,7 @@ def readFile(URL, fileName = "chaingang.txt"):
         ssInfo = nextHop.split(" ")
         ssAddress = ssInfo[0]
         ssPort = int(ssInfo[1])
+        createChain(hopList)
         createConnection(ssAddress, ssPort)
     except OSError:
         print("Could not open/read file " + fileName + "\nExiting...")
