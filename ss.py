@@ -18,23 +18,14 @@ def getRequestByteString(hopList, URL):
     return byteString
 
 
+def getFileBytes(fileName):
+    return open(fileName, "rb").read()
+
+
 # getResponseByteString(): returns byteString of file opened in binary
 def getResponseByteString(URL):
     # 1 indicates reply
-    byteString = b"1,"
-
-    fileName = getFileName(URL)
-
-    try:
-        with open(fileName, "rb") as file:
-            for line in file:
-                byteString += line + b","
-        byteString += fileName.encode()
-        return byteString
-    except IOError:
-        print("Could not open/read file " + fileName + "\nExiting...")
-        exit(1)
-
+    return "1," + getFileName(URL)
 
 
 # goToNextHop(): sends the data to the next hop in the SS list
@@ -74,8 +65,8 @@ def backTrack(prevIP, port, URL):
     print(prevIP)
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.connect((prevIP, port))
-        sock.sendall(b'hello world')
-
+        sock.sendall(byteString.encode())
+        sock.sendall(getFileBytes(getFileName(URL)))
 
 
 def handleClient(hopList, hostname, port, URL, prevAddress):
@@ -93,7 +84,7 @@ def handleClient(hopList, hostname, port, URL, prevAddress):
 
     # Reassign numHops post removal
     numHops = len(hopList)
-
+    print(hopList)
     # Check if last hop
     if numHops == 0:
         # call wget
@@ -134,7 +125,7 @@ def createConnection(hostname, port = 8099):
         print(data)
         dataSplit = data.split(",")
         version = dataSplit.pop(0)
-        print(dataSplit)
+
         if version == "0":
             print("Request")
             hopList = dataSplit
@@ -148,6 +139,8 @@ def createConnection(hostname, port = 8099):
             fileName = fileData.pop(len(fileData) - 1)
             print(version)
             print(fileName)
+            payload = connectedSocket.recv(1024)
+            print(payload)
         else:
             print("Unkown")
 
