@@ -1,28 +1,84 @@
-import sys, socket, random
+import sys, socket, random, os, array
 
 def printUsage():
     print('Usage: ss.py <PORT>')
 
 
-def goToNextHop(address, port, hopList, URL):
-    # Convert hopList to bytestring
-    byteString = ""
+# getByteString(): returns a bytestring in the request format
+def getRequestByteString(hopList, URL):
     numHops = len(hopList)
+    byteString = "0,"
 
     if numHops > 1:
         for hop in hopList:
             byteString += hop + ","
         byteString += URL
     else:
-        byteString = hopList[0] + "," + URL
+        byteString += hopList[0] + "," + URL
+    return byteString
 
-    # Send bytestring over socket connection to next SS
+
+# getResponseByteString(): returns byteString of file opened in binary
+def getResponseByteString(URL):
+    # 1 indicates reply
+    byteString = b"1,"
+
+    fileName = getFileName(URL)
+
+    try:
+        with open(fileName, "rb") as file:
+            for line in file:
+                byteString += line + b","
+        byteString += fileName.encode()
+        return byteString
+    except IOError:
+        print("Could not open/read file " + fileName + "\nExiting...")
+        exit(1)
+
+
+
+# goToNextHop(): sends the data to the next hop in the SS list
+def goToNextHop(address, port, hopList, URL):
+    byteString = getRequestByteString(hopList, URL)
+
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.connect((address, port))
         sock.sendall(byteString.encode())
 
 
-def handleClient(hopList, hostname, port, URL):
+# getFileName(): determine file name based on the URL
+def getFileName(URL):
+    commonTopLevelDomains = ["com", "org", "net", "us", "co", "int", "mil", "edu", "gov", "ca", "cn", "fr", "ch", "au", "in"
+                            "de", "jp", "nl", "uk", "mx", "no", "ru", "br", "se", "es"]
+    filename = os.path.basename(URL)
+    matchFlag = False
+    if filename != "":
+        splitName = filename.split(".")
+        size = len(splitName)
+        for domain in commonTopLevelDomains:
+            if domain == splitName[size - 1]:
+                matchFlag = True
+        if matchFlag == True:
+            name = "index.html"
+        else:
+            name = filename
+    else:
+        name = "index.html"
+    return name
+
+
+def backTrack(prevIP, port, URL):
+    byteString = getResponseByteString(URL)
+    print(byteString)
+    print(port)
+    print(prevIP)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.connect((prevIP, port))
+        sock.sendall(b'hello world')
+
+
+
+def handleClient(hopList, hostname, port, URL, prevAddress):
     # Remove self from hopList
     ip = socket.gethostbyname(hostname)
     removeStr = ip + " " + str(port)
@@ -42,6 +98,9 @@ def handleClient(hopList, hostname, port, URL):
     if numHops == 0:
         # call wget
         print("I am the last hop, getting file: " + URL)
+        command = "wget " + URL
+        os.system(command)
+        backTrack(prevAddress[0], port, URL)
     elif numHops == 1:
         # Go to Last Hop
         print("Going to last hop")
@@ -64,19 +123,33 @@ def createConnection(hostname, port = 8099):
     print("Running on " + hostname + ":" + str(port))
 
     # Create listening socket for connection requests from awget.py
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind((hostname, port))
-        sock.listen()
-        connection, address = sock.accept()
-        with connection:
-            print("Connected by", address)
-            while True:
-                data = connection.recv(1024)
-                if not data:
-                    break
-                hopList = data.decode().split(",")
-                URL = hopList.pop(len(hopList) - 1)
-                handleClient(hopList, hostname, port, URL)
+    ssSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    ssSocket.bind((hostname, port))
+    ssSocket.listen(1)
+
+    while True:
+        connectedSocket, connectedAddress = ssSocket.accept()
+        print("Connected by", connectedAddress)
+        data = connectedSocket.recv(1024).decode()
+        print(data)
+        dataSplit = data.split(",")
+        version = dataSplit.pop(0)
+        print(dataSplit)
+        if version == "0":
+            print("Request")
+            hopList = dataSplit
+            URL = hopList.pop(len(hopList) - 1)
+            print(version)
+            print(URL)
+            handleClient(hopList, hostname, port, URL, connectedAddress)
+        elif version == "1":
+            print("Reply")
+            fileData = dataSplit
+            fileName = fileData.pop(len(fileData) - 1)
+            print(version)
+            print(fileName)
+        else:
+            print("Unkown")
 
 
 def main():

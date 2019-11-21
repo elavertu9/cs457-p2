@@ -4,12 +4,16 @@ def printUsage():
     print('Usage: awget.py <URL> -c <chainfile>')
 
 
-def createConnection(address, port, hopList, URL):
+def getRequestByteString(hopList, URL):
     # Convert hopList to bytestring
-    byteString = ""
+    byteString = "0,"
     for hop in hopList:
         byteString += hop + ","
     byteString += URL
+    return byteString
+
+def createConnection(address, port, hopList, URL):
+    byteString = getRequestByteString(hopList, URL)
 
     # Send bytestring over socket connection to next SS
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
