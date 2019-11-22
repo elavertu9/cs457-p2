@@ -77,7 +77,7 @@ def createConnection(hopList, URL):
         file.write(response)
         while response:
             response = ssSocket.recv(1024)
-            fiel.write(response)
+            file.write(response)
 
         file.close()
         ssSocket.close()

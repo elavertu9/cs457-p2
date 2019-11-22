@@ -56,10 +56,6 @@ def createServer(hostname, port = 8099):
         hopList = removeSelf(hopList, port)
         if not hopList:
             # 7. If the chain list is empty:
-                # a. The ss uses the system call system() (or python equivalent) to issue a wget to retrieve the file specified in the URL.
-                # b. Reads the file in small chunks and transmits it back to the previous SS. The Previous SS also receives the file in chunks.
-                # c. Once the file is completely transmitted, the ss should tear down the connection.
-                # d. Erase the local copy and go back to listening for more requests.
             tempFile = tempfile.NamedTemporaryFile()
             os.system("wget " + "--output-document=" + tempFile.name + " " + URL)
             for line in readInSegments(tempFile):
@@ -68,12 +64,6 @@ def createServer(hostname, port = 8099):
             clientSocket.close()
         else:
             # 8. If the chain list is not empty:
-                # a) Uses a random algorithm such as rand() function to select the next SS from the list.
-                # b) Remove the current ss details from the chain list and send the url and chainlist to the next ss.
-                # c) Wait till you receive the fill from the next ss.
-                # d) Reads the file in small chunks and transmits it back to the previous SS. The Previous SS also receives the file in chunks.
-                # e) Once the file is completely transmitted, the ss should tear down the connection.
-                # f) Erase the local copy and go back to listening for more requests.
                 numHops = len(hopList)
                 randomSS = random.randint(0, numHops - 1)
                 nextSS = hopList[randomSS]
@@ -90,13 +80,17 @@ def createServer(hostname, port = 8099):
                     ssSocket.sendall(listToString(hopList, URL).encode())
                     tempFile = tempfile.NamedTemporaryFile(mode="ab+")
                     response = ssSocket.recv(1024)
+
                     tempFile.write(response)
                     while response:
                         response = ssSocket.recv(1024)
                         tempFile.write(response)
-                        
-                    for line in readInSegments(tempFile):
-                        clientSocket.send(line)
+
+                    tempFile.seek(0)
+
+                    for segment in readInSegments(tempFile):
+                        clientSocket.send(segment)
+
                     tempFile.close()
                     clientSocket.close()
                     ssSocket.close()
