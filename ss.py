@@ -1,164 +1,127 @@
-import sys, socket, random, os, array
+import sys, socket, random, os, tempfile
 
 def printUsage():
     print('Usage: ss.py <PORT>')
 
 
-# getByteString(): returns a bytestring in the request format
-def getRequestByteString(hopList, URL):
-    numHops = len(hopList)
-    byteString = "0,"
-
-    if numHops > 1:
-        for hop in hopList:
-            byteString += hop + ","
-        byteString += URL
-    else:
-        byteString += hopList[0] + "," + URL
-    return byteString
+def removeSelf(hopList, port):
+    ip = socket.gethostbyname(socket.gethostname())
+    searchString = ip + " " + str(port)
+    hopList.remove(searchString)
+    return hopList
 
 
-def getFileBytes(fileName):
-    return open(fileName, "rb").read()
-
-
-# getResponseByteString(): returns byteString of file opened in binary
-def getResponseByteString(URL):
-    # 1 indicates reply
-    return "1," + getFileName(URL)
-
-
-# goToNextHop(): sends the data to the next hop in the SS list
-def goToNextHop(address, port, hopList, URL):
-    byteString = getRequestByteString(hopList, URL)
-
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.connect((address, port))
-        sock.sendall(byteString.encode())
-
-
-# getFileName(): determine file name based on the URL
-def getFileName(URL):
-    commonTopLevelDomains = ["com", "org", "net", "us", "co", "int", "mil", "edu", "gov", "ca", "cn", "fr", "ch", "au", "in"
-                            "de", "jp", "nl", "uk", "mx", "no", "ru", "br", "se", "es"]
-    filename = os.path.basename(URL)
-    matchFlag = False
-    if filename != "":
-        splitName = filename.split(".")
-        size = len(splitName)
-        for domain in commonTopLevelDomains:
-            if domain == splitName[size - 1]:
-                matchFlag = True
-        if matchFlag == True:
-            name = "index.html"
+def listToString(list, URL):
+    listString = URL + ","
+    lastElement = len(list) - 1
+    for element in list:
+        if element == list[lastElement]:
+            listString += element
         else:
-            name = filename
-    else:
-        name = "index.html"
-    return name
+            listString += element + ","
+    return listString
 
 
-def backTrack(prevIP, port, URL):
-    byteString = getResponseByteString(URL)
-    print(byteString)
-    print(port)
-    print(prevIP)
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.connect((prevIP, port))
-        sock.sendall(byteString.encode())
-        sock.sendall(getFileBytes(getFileName(URL)))
+def readInSegments(tempFile, buffer = 1024):
+    while True:
+        content = tempFile.read(buffer)
+        if not content:
+            break
+        yield content
 
 
-def handleClient(hopList, hostname, port, URL, prevAddress):
-    # Remove self from hopList
-    ip = socket.gethostbyname(hostname)
-    removeStr = ip + " " + str(port)
-    numHops = len(hopList)
-
-    if numHops == 1:
-        hopList.pop(0)
-    else:
-        for i in range(numHops - 1):
-            if hopList[i] == removeStr:
-                hopList.pop(i)
-
-    # Reassign numHops post removal
-    numHops = len(hopList)
-    print(hopList)
-    # Check if last hop
-    if numHops == 0:
-        # call wget
-        print("I am the last hop, getting file: " + URL)
-        command = "wget " + URL
-        os.system(command)
-        backTrack(prevAddress[0], port, URL)
-    elif numHops == 1:
-        # Go to Last Hop
-        print("Going to last hop")
-        nextHop = hopList[0]
-        ssInfo = nextHop.split(" ")
-        ssAddress = ssInfo[0]
-        ssPort = int(ssInfo[1])
-        goToNextHop(ssAddress, ssPort, hopList, URL)
-    else:
-        # not done yet go to next hop
-        randomSS = random.randint(0, numHops - 1)
-        nextHop = hopList[randomSS]
-        ssInfo = nextHop.split(" ")
-        ssAddress = ssInfo[0]
-        ssPort = int(ssInfo[1])
-        goToNextHop(ssAddress, ssPort, hopList, URL)
-
-
-def createConnection(hostname, port = 8099):
+def createServer(hostname, port = 8099):
+    # 2. ss prints the hostname and port, it is running on. To find hostname you can use gethostname.
+    # 3. Create the socket and fill in its values. Then Bind the socket.
+    # 4. Create a loop statement and set the socket in listen mode.
+    # 5. Once a connection arrives, it reads the URL and the chain information.
     print("Running on " + hostname + ":" + str(port))
 
-    # Create listening socket for connection requests from awget.py
-    ssSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    ssSocket.bind((hostname, port))
-    ssSocket.listen(1)
+    # Create listening socket for connection requests
+    serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    serverSocket.bind((hostname, port))
+    serverSocket.listen(1)
 
+    # Loop in listen mode
     while True:
-        connectedSocket, connectedAddress = ssSocket.accept()
-        print("Connected by", connectedAddress)
-        data = connectedSocket.recv(1024).decode()
-        print(data)
-        dataSplit = data.split(",")
-        version = dataSplit.pop(0)
+        clientSocket, clientAddress = serverSocket.accept()
+        print("Client connected to server: ", clientAddress)
 
-        if version == "0":
-            print("Request")
-            hopList = dataSplit
-            URL = hopList.pop(len(hopList) - 1)
-            print(version)
-            print(URL)
-            handleClient(hopList, hostname, port, URL, connectedAddress)
-        elif version == "1":
-            print("Reply")
-            fileData = dataSplit
-            fileName = fileData.pop(len(fileData) - 1)
-            print(version)
-            print(fileName)
-            payload = connectedSocket.recv(1024)
-            print(payload)
+        clientMessage = clientSocket.recv(1024).decode()
+        hopList = clientMessage.split(",")
+        URL = hopList.pop(0)
+
+        # TODO: create thread for connection
+        # 6. Create a thread using pthread_create (or python equivalent) and pass the arguments.[Or use select()]
+        hopList = removeSelf(hopList, port)
+        if not hopList:
+            # 7. If the chain list is empty:
+                # a. The ss uses the system call system() (or python equivalent) to issue a wget to retrieve the file specified in the URL.
+                # b. Reads the file in small chunks and transmits it back to the previous SS. The Previous SS also receives the file in chunks.
+                # c. Once the file is completely transmitted, the ss should tear down the connection.
+                # d. Erase the local copy and go back to listening for more requests.
+            tempFile = tempfile.NamedTemporaryFile()
+            os.system("wget " + "--output-document=" + tempFile.name + " " + URL)
+            for line in readInSegments(tempFile):
+                clientSocket.send(line)
+            tempFile.close()
+            clientSocket.close()
         else:
-            print("Unkown")
+            # 8. If the chain list is not empty:
+                # a) Uses a random algorithm such as rand() function to select the next SS from the list.
+                # b) Remove the current ss details from the chain list and send the url and chainlist to the next ss.
+                # c) Wait till you receive the fill from the next ss.
+                # d) Reads the file in small chunks and transmits it back to the previous SS. The Previous SS also receives the file in chunks.
+                # e) Once the file is completely transmitted, the ss should tear down the connection.
+                # f) Erase the local copy and go back to listening for more requests.
+                numHops = len(hopList)
+                randomSS = random.randint(0, numHops - 1)
+                nextSS = hopList[randomSS]
+                ssAddress = nextSS.split(" ")[0]
+                ssPort = int(nextSS.split(" ")[1])
+
+                # Connect to next SS
+                ssSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                ssSocket.connect((ssAddress, ssPort))
+
+                # Send data and wait for response
+                try:
+                    # Format: [URL, ssAddr ssPort, ssAddr, ssPort, ...]
+                    ssSocket.sendall(listToString(hopList, URL).encode())
+                    tempFile = tempfile.NamedTemporaryFile(mode="ab+")
+                    response = ssSocket.recv(1024)
+                    tempFile.write(response)
+                    while response:
+                        response = ssSocket.recv(1024)
+                        tempFile.write(response)
+                        
+                    for line in readInSegments(tempFile):
+                        clientSocket.send(line)
+                    tempFile.close()
+                    clientSocket.close()
+                    ssSocket.close()
+
+                # TODO: will need to read data in chunks
+                except KeyboardInterrupt:
+                    print("Got keyboard interrupt")
+                    exit(1)
 
 
 def main():
-    print("Hello from ss.py")
-    argv = sys.argv[1:]
-    numArgs = len(argv)
+    cmdLineArgs = sys.argv[1:]
+    numArgs = len(cmdLineArgs)
     hostname = socket.gethostname()
 
+    # 1. ss takes one optional argument, the port it will listen on. Example(./ss 20000)
     if numArgs == 1:
-        port = int(argv[0])
-        createConnection(hostname, port)
+        port = int(cmdLineArgs[0])
+        createServer(hostname, port)
     elif numArgs == 0:
         # use default port
-        createConnection(hostname)
+        createServer(hostname)
     else:
         printUsage()
+
 
 if __name__ == '__main__':
     main()
