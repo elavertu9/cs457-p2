@@ -1,16 +1,23 @@
 import sys, socket, random, os, tempfile
 
 def printUsage():
-    print('Usage: ss.py <PORT>')
+    print('Usage: ss.py -p <PORT>\n\tNo argument will use default port 8099')
 
 
+# removeSelf(): removes current ss from chainlist
 def removeSelf(hopList, port):
-    ip = socket.gethostbyname(socket.gethostname())
+    hostname = socket.gethostname()
+    ip = socket.gethostbyname(hostname)
     searchString = ip + " " + str(port)
-    hopList.remove(searchString)
+    searchString2 = hostname + " " + str(port)
+    if searchString in hopList:
+        hopList.remove(searchString)
+    if searchString2 in hopList:
+        hopList.remove(searchString2)
     return hopList
 
 
+# listToString(): return list and url in string format to be sent to next ss
 def listToString(list, URL):
     listString = URL + ","
     lastElement = len(list) - 1
@@ -22,6 +29,7 @@ def listToString(list, URL):
     return listString
 
 
+# readInSegments(): reads contents from file and returns them in defined buffer size
 def readInSegments(tempFile, buffer = 1024):
     while True:
         content = tempFile.read(buffer)
@@ -30,12 +38,35 @@ def readInSegments(tempFile, buffer = 1024):
         yield content
 
 
+# getFileName(): determine file name based on the URL
+def getFileName(URL):
+    commonTopLevelDomains = ["com", "org", "net", "us", "co", "int", "mil", "edu", "gov", "ca", "cn", "fr", "ch", "au", "in"
+                            "de", "jp", "nl", "uk", "mx", "no", "ru", "br", "se", "es"]
+    filename = os.path.basename(URL)
+    matchFlag = False
+    if filename != "":
+        splitName = filename.split(".")
+        size = len(splitName)
+        for domain in commonTopLevelDomains:
+            if domain == splitName[size - 1]:
+                matchFlag = True
+        if matchFlag == True:
+            name = "index.html"
+        else:
+            name = filename
+    else:
+        name = "index.html"
+    return name
+
+
+# isValidPort(): checks if port is within the valid port range
+def isValidPort(port):
+    return port > 0 and port < 65536
+
+
+# createServer(): creates socket and handles client connections
 def createServer(hostname, port = 8099):
-    # 2. ss prints the hostname and port, it is running on. To find hostname you can use gethostname.
-    # 3. Create the socket and fill in its values. Then Bind the socket.
-    # 4. Create a loop statement and set the socket in listen mode.
-    # 5. Once a connection arrives, it reads the URL and the chain information.
-    print("Running on " + hostname + ":" + str(port))
+    print("SS " + hostname + "(" + socket.gethostbyname(hostname) + "), " + str(port) + ":")
 
     # Create listening socket for connection requests
     serverSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -45,7 +76,7 @@ def createServer(hostname, port = 8099):
     # Loop in listen mode
     while True:
         clientSocket, clientAddress = serverSocket.accept()
-        print("Client connected to server: ", clientAddress)
+        #print("Client connected to server: ", clientAddress)
 
         clientMessage = clientSocket.recv(1024).decode()
         hopList = clientMessage.split(",")
@@ -54,12 +85,20 @@ def createServer(hostname, port = 8099):
         # TODO: create thread for connection
         # 6. Create a thread using pthread_create (or python equivalent) and pass the arguments.[Or use select()]
         hopList = removeSelf(hopList, port)
+
+        print("Request: " + URL)
         if not hopList:
             # 7. If the chain list is empty:
+            print("Chainlist is empty")
+            print("Issuing wget for file " + getFileName(URL))
             tempFile = tempfile.NamedTemporaryFile()
-            os.system("wget " + "--output-document=" + tempFile.name + " " + URL)
+            os.system("wget " + "--output-document=" + tempFile.name + " " + URL + " > /dev/null 2>&1")
+
+            print("File received")
+            print("Relaying file...")
             for line in readInSegments(tempFile):
                 clientSocket.send(line)
+            print("Goodbye!")
             tempFile.close()
             clientSocket.close()
         else:
@@ -70,6 +109,12 @@ def createServer(hostname, port = 8099):
                 ssAddress = nextSS.split(" ")[0]
                 ssPort = int(nextSS.split(" ")[1])
 
+                print("Chainlist is ")
+                for hop in hopList:
+                    addr = hop.split(" ")[0]
+                    nextPort = hop.split(" ")[1]
+                    print(addr + ", " + nextPort)
+                print("Next SS is " + ssAddress + ", " + str(ssPort))
                 # Connect to next SS
                 ssSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 ssSocket.connect((ssAddress, ssPort))
@@ -78,6 +123,9 @@ def createServer(hostname, port = 8099):
                 try:
                     # Format: [URL, ssAddr ssPort, ssAddr, ssPort, ...]
                     ssSocket.sendall(listToString(hopList, URL).encode())
+
+                    print("Waiting for file...")
+
                     tempFile = tempfile.NamedTemporaryFile(mode="ab+")
                     response = ssSocket.recv(1024)
 
@@ -88,14 +136,14 @@ def createServer(hostname, port = 8099):
 
                     tempFile.seek(0)
 
+                    print("Relaying file...")
+
                     for segment in readInSegments(tempFile):
                         clientSocket.send(segment)
 
                     tempFile.close()
                     clientSocket.close()
                     ssSocket.close()
-
-                # TODO: will need to read data in chunks
                 except KeyboardInterrupt:
                     print("Got keyboard interrupt")
                     exit(1)
@@ -106,12 +154,16 @@ def main():
     numArgs = len(cmdLineArgs)
     hostname = socket.gethostname()
 
-    # 1. ss takes one optional argument, the port it will listen on. Example(./ss 20000)
-    if numArgs == 1:
-        port = int(cmdLineArgs[0])
-        createServer(hostname, port)
+    if cmdLineArgs[0] == "-p" or cmdLineArgs[0] == "-P":
+        port = int(cmdLineArgs[1])
+        if isValidPort(port):
+            # Use custom port
+            createServer(hostname, port)
+        else:
+            print("Invalid port number\nExiting...")
+            exit(1)
     elif numArgs == 0:
-        # use default port
+        # Use default port
         createServer(hostname)
     else:
         printUsage()
