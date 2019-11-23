@@ -80,18 +80,27 @@ def createConnection(hopList, URL):
         ssSocket.sendall(listToString(hopList, URL).encode())
 
         print("Waiting for file...")
-        fileName = getFileName(URL)
-        file = open(fileName, "wb")
-        response = ssSocket.recv(1024)
-        file.write(response)
-        while response:
-            response = ssSocket.recv(1024)
-            file.write(response)
 
-        print("Received file " + fileName)
-        print("Goodbye!")
-        file.close()
-        ssSocket.close()
+        response = ssSocket.recv(1024)
+        errorCheck = response.decode()
+        responseCheck = errorCheck.split(" ")
+        if responseCheck[0] == "Unable":
+            errorString = "Unable to retrieve file from URL: " + URL
+            print(errorString)
+            print("Goodbye!")
+            ssSocket.close()
+        else:
+            fileName = getFileName(URL)
+            file = open(fileName, "wb")
+            file.write(response)
+            while response:
+                response = ssSocket.recv(1024)
+                file.write(response)
+
+            print("Received file " + fileName)
+            print("Goodbye!")
+            file.close()
+            ssSocket.close()
     except KeyboardInterrupt:
         print("Got keyboard interupt")
         exit(1)

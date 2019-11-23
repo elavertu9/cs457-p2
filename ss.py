@@ -4,6 +4,13 @@ def printUsage():
     print('Usage: ss.py -p <PORT>\n\tNo argument will use default port 8099')
 
 
+def printHopList(hopList):
+    for hop in hopList:
+        addr = hop.split(" ")[0]
+        port = hop.split(" ")[1]
+        print(addr + ", " + port)
+
+
 # removeSelf(): removes current ss from chainlist
 def removeSelf(hopList, port):
     hostname = socket.gethostname()
@@ -38,9 +45,19 @@ def readInSegments(tempFile, buffer = 1024):
         yield content
 
 
+# fileNotEmpty(): checks if file is empty
+def fileNotEmpty(file):
+    file.seek(0)
+    line = file.read()
+    if line == b'':
+        return False
+    else:
+        return True
+
+
 # getFileName(): determine file name based on the URL
 def getFileName(URL):
-    commonTopLevelDomains = ["com", "org", "net", "us", "co", "int", "mil", "edu", "gov", "ca", "cn", "fr", "ch", "au", "in"
+    commonTopLevelDomains = ["com", "org", "net", "us", "co", "int", "mil", "edu", "gov", "ca", "cn", "fr", "ch", "au", "in",
                             "de", "jp", "nl", "uk", "mx", "no", "ru", "br", "se", "es"]
     filename = os.path.basename(URL)
     matchFlag = False
@@ -76,8 +93,6 @@ def createServer(hostname, port = 8099):
     # Loop in listen mode
     while True:
         clientSocket, clientAddress = serverSocket.accept()
-        #print("Client connected to server: ", clientAddress)
-
         clientMessage = clientSocket.recv(1024).decode()
         hopList = clientMessage.split(",")
         URL = hopList.pop(0)
@@ -88,47 +103,65 @@ def createServer(hostname, port = 8099):
 
         print("Request: " + URL)
         if not hopList:
-            # 7. If the chain list is empty:
+            # If the chain list is empty:
             print("Chainlist is empty")
             print("Issuing wget for file " + getFileName(URL))
             tempFile = tempfile.NamedTemporaryFile()
             os.system("wget " + "--output-document=" + tempFile.name + " " + URL + " > /dev/null 2>&1")
 
-            print("File received")
-            print("Relaying file...")
-            for line in readInSegments(tempFile):
-                clientSocket.send(line)
-            print("Goodbye!")
-            tempFile.close()
-            clientSocket.close()
+            if fileNotEmpty(tempFile):
+                tempFile.seek(0)
+                print("File received")
+                print("Relaying file...")
+                for line in readInSegments(tempFile):
+                    clientSocket.send(line)
+                print("Goodbye!")
+                tempFile.close()
+                clientSocket.close()
+            else:
+                print("Failed to retrieve file")
+                print("Relaying error")
+                errorString = "Unable to retrieve file from URL: " + URL
+                clientSocket.sendall(errorString.encode())
+                print("Goodbye!")
+                tempFile.close()
+                clientSocket.close()
         else:
-            # 8. If the chain list is not empty:
-                numHops = len(hopList)
-                randomSS = random.randint(0, numHops - 1)
-                nextSS = hopList[randomSS]
-                ssAddress = nextSS.split(" ")[0]
-                ssPort = int(nextSS.split(" ")[1])
+            # If the chain list is not empty:
+            numHops = len(hopList)
+            randomSS = random.randint(0, numHops - 1)
+            nextSS = hopList[randomSS]
+            ssAddress = nextSS.split(" ")[0]
+            ssPort = int(nextSS.split(" ")[1])
 
-                print("Chainlist is ")
-                for hop in hopList:
-                    addr = hop.split(" ")[0]
-                    nextPort = hop.split(" ")[1]
-                    print(addr + ", " + nextPort)
-                print("Next SS is " + ssAddress + ", " + str(ssPort))
-                # Connect to next SS
-                ssSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                ssSocket.connect((ssAddress, ssPort))
+            print("Chainlist is ")
+            printHopList(hopList)
+            print("Next SS is " + ssAddress + ", " + str(ssPort))
 
-                # Send data and wait for response
-                try:
-                    # Format: [URL, ssAddr ssPort, ssAddr, ssPort, ...]
-                    ssSocket.sendall(listToString(hopList, URL).encode())
+            # Connect to next SS
+            ssSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            ssSocket.connect((ssAddress, ssPort))
 
-                    print("Waiting for file...")
+            # Send data and wait for response
+            try:
+                # Format: [URL, ssAddr ssPort, ssAddr, ssPort, ...]
+                ssSocket.sendall(listToString(hopList, URL).encode())
 
-                    tempFile = tempfile.NamedTemporaryFile(mode="ab+")
-                    response = ssSocket.recv(1024)
+                print("Waiting for file...")
 
+                tempFile = tempfile.NamedTemporaryFile(mode="ab+")
+                response = ssSocket.recv(1024)
+                errorCheck = response.decode()
+                responseCheck = errorCheck.split(" ")
+                if responseCheck[0] == "Unable":
+                    errorString = "Unable to retrieve file from URL: " + URL
+                    clientSocket.sendall(errorString.encode())
+                    print("Failed to retrieve file")
+                    print("Relaying error")
+                    print("Goodbye!")
+                    tempFile.close()
+                    ssSocket.close()
+                else:
                     tempFile.write(response)
                     while response:
                         response = ssSocket.recv(1024)
@@ -144,9 +177,9 @@ def createServer(hostname, port = 8099):
                     tempFile.close()
                     clientSocket.close()
                     ssSocket.close()
-                except KeyboardInterrupt:
-                    print("Got keyboard interrupt")
-                    exit(1)
+            except KeyboardInterrupt:
+                print("Got keyboard interrupt")
+                exit(1)
 
 
 def main():
