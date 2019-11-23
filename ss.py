@@ -1,4 +1,4 @@
-import sys, socket, random, os, tempfile
+import sys, socket, random, os, tempfile, threading
 
 def printUsage():
     print('Usage: ss.py -p <PORT>\n\tNo argument will use default port 8099')
@@ -81,6 +81,90 @@ def isValidPort(port):
     return port > 0 and port < 65536
 
 
+def handleConnection(clientSocket, port, hopList, URL):
+    hopList = removeSelf(hopList, port)
+
+    print("Request: " + URL)
+    if not hopList:
+        # If the chain list is empty:
+        print("Chainlist is empty")
+        print("Issuing wget for file " + getFileName(URL))
+        tempFile = tempfile.NamedTemporaryFile()
+        os.system("wget " + "--output-document=" + tempFile.name + " " + URL + " > /dev/null 2>&1")
+
+        if fileNotEmpty(tempFile):
+            tempFile.seek(0)
+            print("File received")
+            print("Relaying file...")
+            for line in readInSegments(tempFile):
+                clientSocket.send(line)
+            print("Goodbye!")
+            tempFile.close()
+            clientSocket.close()
+        else:
+            print("Failed to retrieve file")
+            print("Relaying error")
+            errorString = "Unable to retrieve file from URL: " + URL
+            clientSocket.sendall(errorString.encode())
+            print("Goodbye!")
+            tempFile.close()
+            clientSocket.close()
+    else:
+        # If the chain list is not empty:
+        numHops = len(hopList)
+        randomSS = random.randint(0, numHops - 1)
+        nextSS = hopList[randomSS]
+        ssAddress = nextSS.split(" ")[0]
+        ssPort = int(nextSS.split(" ")[1])
+
+        print("Chainlist is ")
+        printHopList(hopList)
+        print("Next SS is " + ssAddress + ", " + str(ssPort))
+
+        # Connect to next SS
+        ssSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        ssSocket.connect((ssAddress, ssPort))
+
+        # Send data and wait for response
+        try:
+            # Format: [URL, ssAddr ssPort, ssAddr, ssPort, ...]
+            ssSocket.sendall(listToString(hopList, URL).encode())
+
+            print("Waiting for file...")
+
+            tempFile = tempfile.NamedTemporaryFile(mode="ab+")
+            response = ssSocket.recv(1024)
+            errorCheck = response.decode()
+            responseCheck = errorCheck.split(" ")
+            if responseCheck[0] == "Unable":
+                errorString = "Unable to retrieve file from URL: " + URL
+                clientSocket.sendall(errorString.encode())
+                print("Failed to retrieve file")
+                print("Relaying error")
+                print("Goodbye!")
+                tempFile.close()
+                ssSocket.close()
+            else:
+                tempFile.write(response)
+                while response:
+                    response = ssSocket.recv(1024)
+                    tempFile.write(response)
+
+                tempFile.seek(0)
+
+                print("Relaying file...")
+
+                for segment in readInSegments(tempFile):
+                    clientSocket.send(segment)
+
+                tempFile.close()
+                clientSocket.close()
+                ssSocket.close()
+        except KeyboardInterrupt:
+            print("Got keyboard interrupt")
+            exit(1)
+
+
 # createServer(): creates socket and handles client connections
 def createServer(hostname, port = 8099):
     print("SS " + hostname + "(" + socket.gethostbyname(hostname) + "), " + str(port) + ":")
@@ -97,89 +181,8 @@ def createServer(hostname, port = 8099):
         hopList = clientMessage.split(",")
         URL = hopList.pop(0)
 
-        # TODO: create thread for connection
-        # 6. Create a thread using pthread_create (or python equivalent) and pass the arguments.[Or use select()]
-        hopList = removeSelf(hopList, port)
-
-        print("Request: " + URL)
-        if not hopList:
-            # If the chain list is empty:
-            print("Chainlist is empty")
-            print("Issuing wget for file " + getFileName(URL))
-            tempFile = tempfile.NamedTemporaryFile()
-            os.system("wget " + "--output-document=" + tempFile.name + " " + URL + " > /dev/null 2>&1")
-
-            if fileNotEmpty(tempFile):
-                tempFile.seek(0)
-                print("File received")
-                print("Relaying file...")
-                for line in readInSegments(tempFile):
-                    clientSocket.send(line)
-                print("Goodbye!")
-                tempFile.close()
-                clientSocket.close()
-            else:
-                print("Failed to retrieve file")
-                print("Relaying error")
-                errorString = "Unable to retrieve file from URL: " + URL
-                clientSocket.sendall(errorString.encode())
-                print("Goodbye!")
-                tempFile.close()
-                clientSocket.close()
-        else:
-            # If the chain list is not empty:
-            numHops = len(hopList)
-            randomSS = random.randint(0, numHops - 1)
-            nextSS = hopList[randomSS]
-            ssAddress = nextSS.split(" ")[0]
-            ssPort = int(nextSS.split(" ")[1])
-
-            print("Chainlist is ")
-            printHopList(hopList)
-            print("Next SS is " + ssAddress + ", " + str(ssPort))
-
-            # Connect to next SS
-            ssSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            ssSocket.connect((ssAddress, ssPort))
-
-            # Send data and wait for response
-            try:
-                # Format: [URL, ssAddr ssPort, ssAddr, ssPort, ...]
-                ssSocket.sendall(listToString(hopList, URL).encode())
-
-                print("Waiting for file...")
-
-                tempFile = tempfile.NamedTemporaryFile(mode="ab+")
-                response = ssSocket.recv(1024)
-                errorCheck = response.decode()
-                responseCheck = errorCheck.split(" ")
-                if responseCheck[0] == "Unable":
-                    errorString = "Unable to retrieve file from URL: " + URL
-                    clientSocket.sendall(errorString.encode())
-                    print("Failed to retrieve file")
-                    print("Relaying error")
-                    print("Goodbye!")
-                    tempFile.close()
-                    ssSocket.close()
-                else:
-                    tempFile.write(response)
-                    while response:
-                        response = ssSocket.recv(1024)
-                        tempFile.write(response)
-
-                    tempFile.seek(0)
-
-                    print("Relaying file...")
-
-                    for segment in readInSegments(tempFile):
-                        clientSocket.send(segment)
-
-                    tempFile.close()
-                    clientSocket.close()
-                    ssSocket.close()
-            except KeyboardInterrupt:
-                print("Got keyboard interrupt")
-                exit(1)
+        clientThread = threading.Thread(target = handleConnection, args = (clientSocket, port, hopList, URL), daemon=True)
+        clientThread.start()
 
 
 def main():
@@ -187,7 +190,10 @@ def main():
     numArgs = len(cmdLineArgs)
     hostname = socket.gethostname()
 
-    if cmdLineArgs[0] == "-p" or cmdLineArgs[0] == "-P":
+    if numArgs == 0:
+        # Use default port
+        createServer(hostname)
+    elif cmdLineArgs[0] == "-p" or cmdLineArgs[0] == "-P":
         port = int(cmdLineArgs[1])
         if isValidPort(port):
             # Use custom port
@@ -195,9 +201,6 @@ def main():
         else:
             print("Invalid port number\nExiting...")
             exit(1)
-    elif numArgs == 0:
-        # Use default port
-        createServer(hostname)
     else:
         printUsage()
 
